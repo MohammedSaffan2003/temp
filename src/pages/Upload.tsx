@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload as UploadIcon } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
 
 export default function Upload() {
   const [title, setTitle] = useState('');
@@ -8,13 +10,17 @@ export default function Upload() {
   const [file, setFile] = useState<File | null>(null);
   const [thumbnail, setThumbnail] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { token } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !thumbnail) return;
 
     setUploading(true);
+    setError('');
+
     try {
       const formData = new FormData();
       formData.append('title', title);
@@ -22,11 +28,16 @@ export default function Upload() {
       formData.append('video', file);
       formData.append('thumbnail', thumbnail);
 
-      // TODO: Implement API call
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulated upload
-      navigate('/');
-    } catch (error) {
-      console.error('Upload failed:', error);
+      await axios.post('/api/videos', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      navigate('/your-videos');
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Failed to upload video');
     } finally {
       setUploading(false);
     }
@@ -36,6 +47,12 @@ export default function Upload() {
     <div className="max-w-4xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-8">Upload Video</h1>
       
+      {error && (
+        <div className="mb-4 p-4 text-red-700 bg-red-100 rounded-lg">
+          {error}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
           <input
