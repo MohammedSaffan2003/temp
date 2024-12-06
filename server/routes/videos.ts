@@ -68,10 +68,14 @@ router.post('/', auth, upload.fields([
 ]), async (req, res) => {
   try {
     const { title, description } = req.body;
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const uploadedFiles = req.files as { [fieldname: string]: Express.Multer.File[] };
+
+    if (!uploadedFiles.video?.[0] || !uploadedFiles.thumbnail?.[0]) {
+      return res.status(400).json({ message: 'Video and thumbnail are required' });
+    }
 
     // Generate HLS segments
-    const videoPath = files.video[0].path;
+    const videoPath = uploadedFiles.video[0].path;
     const outputDir = path.join(uploadsDir, uuidv4());
     fs.mkdirSync(outputDir, { recursive: true });
 
@@ -94,18 +98,18 @@ router.post('/', auth, upload.fields([
     await hlsPromise;
 
     // Upload HLS segments to Cloudinary
-    const files = fs.readdirSync(outputDir);
-    const uploadPromises = files.map(file => 
+    const segmentFiles = fs.readdirSync(outputDir);
+    const segmentUploadPromises = segmentFiles.map(file => 
       cloudinary.uploader.upload(path.join(outputDir, file), {
         resource_type: 'raw',
         folder: `videos/${path.basename(outputDir)}`
       })
     );
 
-    const uploadedFiles = await Promise.all(uploadPromises);
+    const uploadedSegments = await Promise.all(segmentUploadPromises);
 
     // Upload thumbnail
-    const thumbnailResult = await cloudinary.uploader.upload(files.thumbnail[0].path, {
+    const thumbnailResult = await cloudinary.uploader.upload(uploadedFiles.thumbnail[0].path, {
       folder: 'thumbnails'
     });
 
@@ -113,7 +117,7 @@ router.post('/', auth, upload.fields([
     const video = new Video({
       title,
       description,
-      videoUrl: uploadedFiles.find(f => f.public_id.endsWith('playlist.m3u8'))?.secure_url,
+      videoUrl: uploadedSegments.find(f => f.public_id.endsWith('playlist.m3u8'))?.secure_url,
       thumbnailUrl: thumbnailResult.secure_url,
       creator: req.user.userId,
       views: 0,
@@ -125,7 +129,7 @@ router.post('/', auth, upload.fields([
     // Cleanup
     fs.rmSync(outputDir, { recursive: true, force: true });
     fs.unlinkSync(videoPath);
-    fs.unlinkSync(files.thumbnail[0].path);
+    fs.unlinkSync(uploadedFiles.thumbnail[0].path);
 
     res.status(201).json(video);
   } catch (error) {
