@@ -1,12 +1,22 @@
 import express from 'express';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
+import ffmpeg from 'fluent-ffmpeg';
 import Video from '../models/Video';
 import User from '../models/User';
 import { auth } from '../middleware/auth';
+import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 // Get all videos
 router.get('/', async (req, res) => {
@@ -60,21 +70,50 @@ router.post('/', auth, upload.fields([
     const { title, description } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-    // Upload video to Cloudinary
-    const videoResult = await cloudinary.uploader.upload(files.video[0].path, {
-      resource_type: 'video',
-      folder: 'videos'
+    // Generate HLS segments
+    const videoPath = files.video[0].path;
+    const outputDir = path.join(uploadsDir, uuidv4());
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const hlsPromise = new Promise((resolve, reject) => {
+      ffmpeg(videoPath)
+        .addOptions([
+          '-profile:v baseline',
+          '-level 3.0',
+          '-start_number 0',
+          '-hls_time 10',
+          '-hls_list_size 0',
+          '-f hls'
+        ])
+        .output(path.join(outputDir, 'playlist.m3u8'))
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
     });
 
-    // Upload thumbnail to Cloudinary
+    await hlsPromise;
+
+    // Upload HLS segments to Cloudinary
+    const files = fs.readdirSync(outputDir);
+    const uploadPromises = files.map(file => 
+      cloudinary.uploader.upload(path.join(outputDir, file), {
+        resource_type: 'raw',
+        folder: `videos/${path.basename(outputDir)}`
+      })
+    );
+
+    const uploadedFiles = await Promise.all(uploadPromises);
+
+    // Upload thumbnail
     const thumbnailResult = await cloudinary.uploader.upload(files.thumbnail[0].path, {
       folder: 'thumbnails'
     });
 
+    // Create video document
     const video = new Video({
       title,
       description,
-      videoUrl: videoResult.secure_url,
+      videoUrl: uploadedFiles.find(f => f.public_id.endsWith('playlist.m3u8'))?.secure_url,
       thumbnailUrl: thumbnailResult.secure_url,
       creator: req.user.userId,
       views: 0,
@@ -82,8 +121,15 @@ router.post('/', auth, upload.fields([
     });
 
     await video.save();
+
+    // Cleanup
+    fs.rmSync(outputDir, { recursive: true, force: true });
+    fs.unlinkSync(videoPath);
+    fs.unlinkSync(files.thumbnail[0].path);
+
     res.status(201).json(video);
   } catch (error) {
+    console.error('Upload error:', error);
     res.status(500).json({ message: 'Error uploading video' });
   }
 });
