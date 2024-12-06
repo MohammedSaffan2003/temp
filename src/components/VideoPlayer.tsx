@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { ThumbsUp, MessageCircle, Share2, Loader } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
@@ -22,9 +23,11 @@ interface VideoPlayerProps {
 
 export default function VideoPlayer({ video }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLiked, setIsLiked] = useState(false);
+  const [currentQuality, setCurrentQuality] = useState<number>(-1);
   const { user, token } = useAuth();
 
   useEffect(() => {
@@ -34,36 +37,91 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   }, [user, video.likes]);
 
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !video.videoUrl) return;
 
     const videoElement = videoRef.current;
-    
-    try {
-      videoElement.src = video.videoUrl;
-      videoElement.addEventListener('loadedmetadata', () => {
-        setIsLoading(false);
-      });
-      videoElement.addEventListener('error', () => {
-        setError('Failed to load video. Please try again later.');
-        setIsLoading(false);
-      });
 
-      // Track view
-      if (user) {
-        axios.post(`/api/videos/${video.id}/view`, null, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+    const initializeHls = () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
       }
-    } catch (err) {
-      setError('Failed to initialize video player');
-      setIsLoading(false);
-    }
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          maxBufferSize: 0,
+          maxBufferLength: 30,
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 90
+        });
+
+        hlsRef.current = hls;
+
+        hls.loadSource(video.videoUrl);
+        hls.attachMedia(videoElement);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setIsLoading(false);
+          videoElement.play().catch(() => {
+            console.warn('Playback failed, likely due to autoplay restrictions');
+          });
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error('Network error, attempting to recover...');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('Media error, attempting to recover...');
+                hls.recoverMediaError();
+                break;
+              default:
+                setError('Failed to load video. Please try again later.');
+                setIsLoading(false);
+                break;
+            }
+          }
+        });
+
+        // Track view
+        if (user) {
+          axios.post(`/api/videos/${video.id}/view`, null, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        }
+      } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+        // For Safari
+        videoElement.src = video.videoUrl;
+        videoElement.addEventListener('loadedmetadata', () => {
+          setIsLoading(false);
+          videoElement.play().catch(() => {
+            console.warn('Playback failed, likely due to autoplay restrictions');
+          });
+        });
+      } else {
+        setError('Your browser does not support HLS playback');
+        setIsLoading(false);
+      }
+    };
+
+    initializeHls();
 
     return () => {
-      videoElement.removeEventListener('loadedmetadata', () => {});
-      videoElement.removeEventListener('error', () => {});
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
     };
   }, [video.videoUrl, user, token, video.id]);
+
+  const handleQualityChange = (level: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = level;
+      setCurrentQuality(level);
+    }
+  };
 
   const handleLike = async () => {
     if (!user) return;
@@ -100,13 +158,31 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             <p className="text-white text-center">{error}</p>
           </div>
         ) : (
-          <video
-            ref={videoRef}
-            className="w-full h-full"
-            controls
-            playsInline
-            poster={video.thumbnailUrl}
-          />
+          <>
+            <video
+              ref={videoRef}
+              className="w-full h-full"
+              controls
+              playsInline
+              poster={video.thumbnailUrl}
+            />
+            {hlsRef.current && (
+              <div className="absolute bottom-16 right-4 bg-black bg-opacity-75 rounded px-2 py-1">
+                <select
+                  value={currentQuality}
+                  onChange={(e) => handleQualityChange(Number(e.target.value))}
+                  className="bg-transparent text-white text-sm"
+                >
+                  <option value="-1">Auto</option>
+                  {hlsRef.current.levels.map((level, index) => (
+                    <option key={index} value={index}>
+                      {level.height}p
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </>
         )}
       </div>
       
