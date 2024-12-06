@@ -1,89 +1,89 @@
 import React, { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
 import { ThumbsUp, MessageCircle, Share2, Loader } from 'lucide-react';
-import type { Video } from '../types';
+import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
 
 interface VideoPlayerProps {
-  video: Video;
+  video: {
+    id: string;
+    title: string;
+    description: string;
+    videoUrl: string;
+    thumbnailUrl: string;
+    creator: {
+      name: string;
+      avatarUrl: string;
+    };
+    views: number;
+    likes: string[];
+    createdAt: string;
+  };
 }
 
 export default function VideoPlayer({ video }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentQuality, setCurrentQuality] = useState<string>('auto');
+  const [isLiked, setIsLiked] = useState(false);
+  const { user, token } = useAuth();
 
   useEffect(() => {
-    if (!videoRef.current || !video.videoUrl) {
-      setError('Video URL is invalid');
-      setIsLoading(false);
-      return;
+    if (user && video.likes) {
+      setIsLiked(video.likes.includes(user.id));
     }
+  }, [user, video.likes]);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
 
     const videoElement = videoRef.current;
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        autoStartLoad: true,
-        startLevel: -1,
-        capLevelToPlayerSize: true,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 600
-      });
-
-      try {
-        hls.loadSource(video.videoUrl);
-        hls.attachMedia(videoElement);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          setIsLoading(false);
-          videoElement.play().catch(() => {
-            console.warn('Playback failed, likely due to autoplay restrictions');
-          });
-        });
-
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            setError('Failed to load video. Please try again later.');
-            setIsLoading(false);
-          }
-        });
-
-        return () => {
-          hls.destroy();
-        };
-      } catch (err) {
-        setError('Failed to initialize video player');
-        setIsLoading(false);
-      }
-    } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-      // For Safari
+    
+    try {
       videoElement.src = video.videoUrl;
       videoElement.addEventListener('loadedmetadata', () => {
         setIsLoading(false);
-        videoElement.play().catch(() => {
-          console.warn('Playback failed, likely due to autoplay restrictions');
-        });
       });
       videoElement.addEventListener('error', () => {
         setError('Failed to load video. Please try again later.');
         setIsLoading(false);
       });
-    } else {
-      setError('Your browser does not support HLS playback');
+
+      // Track view
+      if (user) {
+        axios.post(`/api/videos/${video.id}/view`, null, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+    } catch (err) {
+      setError('Failed to initialize video player');
       setIsLoading(false);
     }
-  }, [video.videoUrl]);
 
-  const handleQualityChange = (quality: string) => {
-    if (!videoRef.current) return;
-    
-    const video = videoRef.current;
-    if (Hls.isSupported()) {
-      const hls = new Hls();
-      const level = quality === 'auto' ? -1 : parseInt(quality);
-      hls.currentLevel = level;
-      setCurrentQuality(quality);
+    return () => {
+      videoElement.removeEventListener('loadedmetadata', () => {});
+      videoElement.removeEventListener('error', () => {});
+    };
+  }, [video.videoUrl, user, token, video.id]);
+
+  const handleLike = async () => {
+    if (!user) return;
+
+    try {
+      await axios.post(`/api/videos/${video.id}/like`, null, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setIsLiked(!isLiked);
+    } catch (err) {
+      console.error('Error liking video:', err);
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      alert('Video link copied to clipboard!');
+    } catch (err) {
+      console.error('Error sharing video:', err);
     }
   };
 
@@ -100,27 +100,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             <p className="text-white text-center">{error}</p>
           </div>
         ) : (
-          <>
-            <video
-              ref={videoRef}
-              className="w-full h-full"
-              controls
-              playsInline
-              poster={video.thumbnailUrl}
-            />
-            <div className="absolute bottom-4 right-4">
-              <select
-                value={currentQuality}
-                onChange={(e) => handleQualityChange(e.target.value)}
-                className="bg-black bg-opacity-75 text-white px-2 py-1 rounded"
-              >
-                <option value="auto">Auto</option>
-                <option value="2">1080p</option>
-                <option value="1">720p</option>
-                <option value="0">480p</option>
-              </select>
-            </div>
-          </>
+          <video
+            ref={videoRef}
+            className="w-full h-full"
+            controls
+            playsInline
+            poster={video.thumbnailUrl}
+          />
         )}
       </div>
       
@@ -142,15 +128,23 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           </div>
           
           <div className="flex space-x-4">
-            <button className="flex items-center space-x-2 px-4 py-2 rounded-full hover:bg-gray-100">
-              <ThumbsUp className="h-5 w-5" />
+            <button 
+              onClick={handleLike}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-full hover:bg-gray-100 ${
+                isLiked ? 'text-indigo-600' : ''
+              }`}
+            >
+              <ThumbsUp className={`h-5 w-5 ${isLiked ? 'fill-current' : ''}`} />
               <span>Like</span>
             </button>
             <button className="flex items-center space-x-2 px-4 py-2 rounded-full hover:bg-gray-100">
               <MessageCircle className="h-5 w-5" />
               <span>Comment</span>
             </button>
-            <button className="flex items-center space-x-2 px-4 py-2 rounded-full hover:bg-gray-100">
+            <button 
+              onClick={handleShare}
+              className="flex items-center space-x-2 px-4 py-2 rounded-full hover:bg-gray-100"
+            >
               <Share2 className="h-5 w-5" />
               <span>Share</span>
             </button>
