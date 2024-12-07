@@ -1,5 +1,7 @@
 import express from 'express';
 import multer from 'multer';
+import { Request, Response } from 'express';
+
 import { v2 as cloudinary } from 'cloudinary';
 import ffmpeg from 'fluent-ffmpeg';
 import Video from '../models/Video';
@@ -19,7 +21,7 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // Get all videos
-router.get('/', async (req, res) => {
+router.get('/', async (req : Request, res : Response) => {
   try {
     const videos = await Video.find()
       .populate('creator', 'username avatarUrl')
@@ -32,7 +34,7 @@ router.get('/', async (req, res) => {
 });
 
 // Search videos
-router.get('/search', async (req, res) => {
+router.get('/search', async (req : Request, res : Response) => {
   try {
     const { q } = req.query;
     const searchQuery = q ? { $text: { $search: q as string } } : {};
@@ -49,7 +51,7 @@ router.get('/search', async (req, res) => {
 });
 
 // Get user's videos
-router.get('/user', auth, async (req, res) => {
+router.get('/user', auth, async (req : Request, res : Response) => {
   try {
     const videos = await Video.find({ creator: req.user.userId })
       .populate('creator', 'username avatarUrl')
@@ -139,7 +141,7 @@ router.post('/', auth, upload.fields([
 });
 
 // Like/unlike video
-router.post('/:id/like', auth, async (req, res) => {
+router.post('/:id/like', auth, async (req : Request, res : Response) => {
   try {
     const video = await Video.findById(req.params.id);
     if (!video) {
@@ -167,7 +169,7 @@ router.post('/:id/like', auth, async (req, res) => {
 });
 
 // Track video view
-router.post('/:id/view', auth, async (req, res) => {
+router.post('/:id/view', auth, async (req : Request, res : Response) => {
   try {
     const video = await Video.findById(req.params.id);
     if (!video) {
