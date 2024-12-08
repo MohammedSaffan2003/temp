@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import axios from 'axios';
-import { Send, Search } from 'lucide-react';
+import { Send, Search, Circle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 interface Message {
@@ -27,6 +28,7 @@ interface ChatRoom {
 
 export default function Chat() {
   const { user, token } = useAuth();
+  const { socket, onlineUsers } = useSocket();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -41,8 +43,23 @@ export default function Chat() {
   useEffect(() => {
     if (activeChat) {
       fetchMessages(activeChat);
+      socket?.emit('join-chat', activeChat);
     }
+
+    return () => {
+      if (activeChat) {
+        socket?.emit('leave-chat', activeChat);
+      }
+    };
   }, [activeChat]);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('receive-message', (message: Message) => {
+        setMessages(prev => [...prev, message]);
+      });
+    }
+  }, [socket]);
 
   useEffect(() => {
     scrollToBottom();
@@ -74,7 +91,7 @@ export default function Chat() {
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeChat || !newMessage.trim()) return;
+    if (!activeChat || !newMessage.trim() || !socket) return;
 
     try {
       const response = await axios.post(
@@ -82,7 +99,13 @@ export default function Chat() {
         { content: newMessage },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setMessages([...messages, response.data]);
+
+      socket.emit('send-message', {
+        chatId: activeChat,
+        message: response.data
+      });
+
+      setMessages(prev => [...prev, response.data]);
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
@@ -98,8 +121,8 @@ export default function Chat() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="bg-white rounded-lg shadow-lg h-[calc(100vh-8rem)] flex">
-        {/* Chat List */}
-        <div className="w-1/3 border-r">
+        {/* Chat List and Online Users */}
+        <div className="w-1/3 border-r flex flex-col">
           <div className="p-4 border-b">
             <div className="relative">
               <input
@@ -110,7 +133,27 @@ export default function Chat() {
               <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
             </div>
           </div>
-          <div className="overflow-y-auto h-[calc(100%-4rem)]">
+
+          {/* Online Users */}
+          <div className="p-4 border-b">
+            <h3 className="text-sm font-semibold text-gray-500 mb-2">Online Users</h3>
+            <div className="space-y-2">
+              {onlineUsers.map(user => (
+                <div key={user.userId} className="flex items-center space-x-2">
+                  <Circle className="h-2 w-2 text-green-500 fill-current" />
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.username}
+                    className="w-8 h-8 rounded-full"
+                  />
+                  <span className="text-sm">{user.username}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat List */}
+          <div className="flex-1 overflow-y-auto">
             {chats.map(chat => (
               <button
                 key={chat._id}
@@ -136,6 +179,13 @@ export default function Chat() {
                     {chat.lastMessage}
                   </p>
                 </div>
+                {onlineUsers.some(u => 
+                  u.userId === (chat.participants[0]._id === user?.id ? 
+                    chat.participants[1]._id : 
+                    chat.participants[0]._id)
+                ) && (
+                  <Circle className="h-2 w-2 text-green-500 fill-current" />
+                )}
               </button>
             ))}
           </div>
