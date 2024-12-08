@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
@@ -13,9 +13,7 @@ const VideoPage = lazy(() => import('./pages/VideoPage'));
 const Login = lazy(() => import('./pages/Login'));
 const Signup = lazy(() => import('./pages/Signup'));
 const Upload = lazy(() => import('./pages/Upload'));
-const History = lazy(() => import('./pages/History'));
-const LikedVideos = lazy(() => import('./pages/LikedVideos'));
-const YourVideos = lazy(() => import('./pages/YourVideos'));
+const Profile = lazy(() => import('./pages/Profile'));
 const Search = lazy(() => import('./pages/Search'));
 const Chat = lazy(() => import('./pages/Chat'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -33,7 +31,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -50,6 +48,11 @@ function AppRoutes() {
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/search" element={<Search />} />
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            } />
             <Route path="/chat" element={
               <ProtectedRoute>
                 <Chat />
@@ -58,21 +61,6 @@ function AppRoutes() {
             <Route path="/upload" element={
               <ProtectedRoute>
                 <Upload />
-              </ProtectedRoute>
-            } />
-            <Route path="/history" element={
-              <ProtectedRoute>
-                <History />
-              </ProtectedRoute>
-            } />
-            <Route path="/liked" element={
-              <ProtectedRoute>
-                <LikedVideos />
-              </ProtectedRoute>
-            } />
-            <Route path="/your-videos" element={
-              <ProtectedRoute>
-                <YourVideos />
               </ProtectedRoute>
             } />
             <Route path="/admin" element={
