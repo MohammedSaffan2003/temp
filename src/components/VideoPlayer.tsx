@@ -27,7 +27,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLiked, setIsLiked] = useState(false);
-  const [currentQuality, setCurrentQuality] = useState<number>(-1);
   const { user, token } = useAuth();
 
   useEffect(() => {
@@ -41,90 +40,81 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     const videoElement = videoRef.current;
 
-    const initializeHls = () => {
+    const initializeVideo = () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
 
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          maxBufferSize: 0,
-          maxBufferLength: 30,
-          enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 90
-        });
-
-        hlsRef.current = hls;
-
-        hls.loadSource(video.videoUrl);
-        hls.attachMedia(videoElement);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          setIsLoading(false);
-          videoElement.play().catch(() => {
-            console.warn('Playback failed, likely due to autoplay restrictions');
+      // Check if the URL is an HLS stream
+      if (video.videoUrl.includes('.m3u8')) {
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
           });
-        });
 
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                console.error('Network error, attempting to recover...');
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                console.error('Media error, attempting to recover...');
-                hls.recoverMediaError();
-                break;
-              default:
-                setError('Failed to load video. Please try again later.');
-                setIsLoading(false);
-                break;
+          hlsRef.current = hls;
+          hls.loadSource(video.videoUrl);
+          hls.attachMedia(videoElement);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setIsLoading(false);
+            videoElement.play().catch(console.error);
+          });
+
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  hls.startLoad();
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  hls.recoverMediaError();
+                  break;
+                default:
+                  setError('Failed to load video. Please try again later.');
+                  setIsLoading(false);
+                  break;
+              }
             }
-          }
-        });
-
-        // Track view
-        if (user) {
-          axios.post(`/api/videos/${video.id}/view`, null, {
-            headers: { Authorization: `Bearer ${token}` }
+          });
+        } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+          // For Safari
+          videoElement.src = video.videoUrl;
+          videoElement.addEventListener('loadedmetadata', () => {
+            setIsLoading(false);
+            videoElement.play().catch(console.error);
           });
         }
-      } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-        // For Safari
+      } else {
+        // Regular video URL
         videoElement.src = video.videoUrl;
         videoElement.addEventListener('loadedmetadata', () => {
           setIsLoading(false);
-          videoElement.play().catch(() => {
-            console.warn('Playback failed, likely due to autoplay restrictions');
-          });
+          videoElement.play().catch(console.error);
         });
-      } else {
-        setError('Your browser does not support HLS playback');
-        setIsLoading(false);
+      }
+
+      // Track view
+      if (user && token) {
+        axios.post(`/api/videos/${video.id}/view`, null, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(console.error);
       }
     };
 
-    initializeHls();
+    initializeVideo();
 
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
+      videoElement.removeEventListener('loadedmetadata', () => {});
     };
   }, [video.videoUrl, user, token, video.id]);
 
-  const handleQualityChange = (level: number) => {
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = level;
-      setCurrentQuality(level);
-    }
-  };
-
   const handleLike = async () => {
-    if (!user) return;
+    if (!user || !token) return;
 
     try {
       await axios.post(`/api/videos/${video.id}/like`, null, {
@@ -158,31 +148,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             <p className="text-white text-center">{error}</p>
           </div>
         ) : (
-          <>
-            <video
-              ref={videoRef}
-              className="w-full h-full"
-              controls
-              playsInline
-              poster={video.thumbnailUrl}
-            />
-            {hlsRef.current && (
-              <div className="absolute bottom-16 right-4 bg-black bg-opacity-75 rounded px-2 py-1">
-                <select
-                  value={currentQuality}
-                  onChange={(e) => handleQualityChange(Number(e.target.value))}
-                  className="bg-transparent text-white text-sm"
-                >
-                  <option value="-1">Auto</option>
-                  {hlsRef.current.levels.map((level, index) => (
-                    <option key={index} value={index}>
-                      {level.height}p
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </>
+          <video
+            ref={videoRef}
+            className="w-full h-full"
+            controls
+            playsInline
+            poster={video.thumbnailUrl}
+          />
         )}
       </div>
       
@@ -228,7 +200,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         </div>
         
         <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-          <p className="text-gray-800">{video.description}</p>
+          <p className="text-gray-800 whitespace-pre-wrap">{video.description}</p>
         </div>
       </div>
     </div>
