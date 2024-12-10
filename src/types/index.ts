@@ -1,16 +1,18 @@
 export interface Video {
-  id: string;
+  _id: string;
   title: string;
   description: string;
   thumbnailUrl: string;
   videoUrl: string;
-  duration: string;
+  duration?: string;
   views: number;
   createdAt: string;
   creator: {
-    name: string;
+    _id: string;
+    username: string;
     avatarUrl: string;
   };
+  likes: string[];
 }
 
 export interface User {
