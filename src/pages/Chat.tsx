@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import axios from 'axios';
-import { Send, Search, Circle } from 'lucide-react';
+import { Send, Search, Circle, Users, MessageCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 interface Message {
@@ -26,6 +26,12 @@ interface ChatRoom {
   lastMessage: string;
 }
 
+interface User {
+  _id: string;
+  username: string;
+  avatarUrl: string;
+}
+
 export default function Chat() {
   const { user, token } = useAuth();
   const { socket, onlineUsers } = useSocket();
@@ -34,10 +40,14 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showUserList, setShowUserList] = useState(false);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchChats();
+    fetchUsers();
   }, [token]);
 
   useEffect(() => {
@@ -78,6 +88,17 @@ export default function Chat() {
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const response = await axios.get('/api/users', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAllUsers(response.data.filter((u: User) => u._id !== user?.id));
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    }
+  };
+
   const fetchMessages = async (chatId: string) => {
     try {
       const response = await axios.get(`/api/chat/${chatId}`, {
@@ -86,6 +107,25 @@ export default function Chat() {
       setMessages(response.data);
     } catch (error) {
       console.error('Error fetching messages:', error);
+    }
+  };
+
+  const startNewChat = async (userId: string) => {
+    try {
+      const response = await axios.post('/api/chat', 
+        { participantId: userId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setChats(prev => {
+        if (!prev.find(chat => chat._id === response.data._id)) {
+          return [...prev, response.data];
+        }
+        return prev;
+      });
+      setActiveChat(response.data._id);
+      setShowUserList(false);
+    } catch (error) {
+      console.error('Error starting new chat:', error);
     }
   };
 
@@ -116,78 +156,105 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const filteredUsers = allUsers.filter(u => 
+    u.username.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   if (loading) return <LoadingSpinner />;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="bg-white rounded-lg shadow-lg h-[calc(100vh-8rem)] flex">
-        {/* Chat List and Online Users */}
+        {/* Sidebar */}
         <div className="w-1/3 border-r flex flex-col">
+          {/* Search and New Chat */}
           <div className="p-4 border-b">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Messages</h2>
+              <button
+                onClick={() => setShowUserList(!showUserList)}
+                className="p-2 hover:bg-gray-100 rounded-full"
+                title="Start new chat"
+              >
+                <MessageCircle className="h-5 w-5" />
+              </button>
+            </div>
             <div className="relative">
               <input
                 type="text"
                 placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:border-indigo-500"
               />
               <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
             </div>
           </div>
 
-          {/* Online Users */}
-          <div className="p-4 border-b">
-            <h3 className="text-sm font-semibold text-gray-500 mb-2">Online Users</h3>
-            <div className="space-y-2">
-              {onlineUsers.map(user => (
-                <div key={user.userId} className="flex items-center space-x-2">
-                  <Circle className="h-2 w-2 text-green-500 fill-current" />
-                  <img
-                    src={user.avatarUrl}
-                    alt={user.username}
-                    className="w-8 h-8 rounded-full"
-                  />
-                  <span className="text-sm">{user.username}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Chat List */}
+          {/* User List or Chat List */}
           <div className="flex-1 overflow-y-auto">
-            {chats.map(chat => (
-              <button
-                key={chat._id}
-                onClick={() => setActiveChat(chat._id)}
-                className={`w-full p-4 flex items-center space-x-3 hover:bg-gray-50 ${
-                  activeChat === chat._id ? 'bg-gray-50' : ''
-                }`}
-              >
-                <img
-                  src={chat.participants[0]._id === user?.id ? 
-                    chat.participants[1].avatarUrl : 
-                    chat.participants[0].avatarUrl}
-                  alt="Profile"
-                  className="w-12 h-12 rounded-full"
-                />
-                <div className="flex-1">
-                  <h3 className="font-medium">
-                    {chat.participants[0]._id === user?.id ? 
-                      chat.participants[1].username : 
-                      chat.participants[0].username}
-                  </h3>
-                  <p className="text-sm text-gray-500 truncate">
-                    {chat.lastMessage}
-                  </p>
+            {showUserList ? (
+              <div className="p-4">
+                <div className="flex items-center mb-4">
+                  <Users className="h-5 w-5 mr-2" />
+                  <h3 className="font-semibold">All Users</h3>
                 </div>
-                {onlineUsers.some(u => 
-                  u.userId === (chat.participants[0]._id === user?.id ? 
-                    chat.participants[1]._id : 
-                    chat.participants[0]._id)
-                ) && (
-                  <Circle className="h-2 w-2 text-green-500 fill-current" />
-                )}
-              </button>
-            ))}
+                {filteredUsers.map(user => (
+                  <button
+                    key={user._id}
+                    onClick={() => startNewChat(user._id)}
+                    className="w-full flex items-center p-3 hover:bg-gray-50 rounded-lg"
+                  >
+                    <img
+                      src={user.avatarUrl}
+                      alt={user.username}
+                      className="w-10 h-10 rounded-full"
+                    />
+                    <div className="ml-3 flex-1">
+                      <p className="font-medium">{user.username}</p>
+                      {onlineUsers.some(u => u.userId === user._id) && (
+                        <p className="text-sm text-green-500">Online</p>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              chats.map(chat => (
+                <button
+                  key={chat._id}
+                  onClick={() => setActiveChat(chat._id)}
+                  className={`w-full p-4 flex items-center space-x-3 hover:bg-gray-50 ${
+                    activeChat === chat._id ? 'bg-gray-50' : ''
+                  }`}
+                >
+                  <img
+                    src={chat.participants[0]._id === user?.id ? 
+                      chat.participants[1].avatarUrl : 
+                      chat.participants[0].avatarUrl}
+                    alt="Profile"
+                    className="w-12 h-12 rounded-full"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-medium">
+                      {chat.participants[0]._id === user?.id ? 
+                        chat.participants[1].username : 
+                        chat.participants[0].username}
+                    </h3>
+                    <p className="text-sm text-gray-500 truncate">
+                      {chat.lastMessage}
+                    </p>
+                  </div>
+                  {onlineUsers.some(u => 
+                    u.userId === (chat.participants[0]._id === user?.id ? 
+                      chat.participants[1]._id : 
+                      chat.participants[0]._id)
+                  ) && (
+                    <Circle className="h-2 w-2 text-green-500 fill-current" />
+                  )}
+                </button>
+              ))
+            )}
           </div>
         </div>
 
@@ -245,7 +312,7 @@ export default function Chat() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500">
-              Select a chat to start messaging
+              Select a chat or start a new conversation
             </div>
           )}
         </div>
