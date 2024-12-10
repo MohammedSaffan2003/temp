@@ -1,24 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import VideoPlayer from '../components/VideoPlayer';
 import CommentSection from '../components/CommentSection';
+import LoadingSpinner from '../components/LoadingSpinner';
+import axios from 'axios';
 import type { Video, Comment } from '../types';
-
-// Mock data
-const video: Video = {
-  id: '1',
-  title: 'Beautiful Coastal Sunrise - Nature Documentary',
-  description: 'Experience the stunning views of coastal sunrise in this breathtaking documentary. Watch as we explore the magnificent coastline and witness nature\'s most spectacular show.',
-  thumbnailUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e',
-  videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-  duration: '10:32',
-  views: 1234567,
-  createdAt: '2 weeks ago',
-  creator: {
-    name: 'Nature Channel',
-    avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde',
-  },
-};
 
 const comments: Comment[] = [
   {
@@ -43,6 +29,31 @@ const comments: Comment[] = [
 
 export default function VideoPage() {
   const { id } = useParams();
+  const [video, setVideo] = useState<Video | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchVideo = async () => {
+      try {
+        const response = await axios.get(`/api/videos/${id}`);
+        setVideo(response.data);
+      } catch (err) {
+        setError('Failed to load video');
+        console.error('Error fetching video:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) {
+      fetchVideo();
+    }
+  }, [id]);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <div className="text-center text-red-600 mt-8">{error}</div>;
+  if (!video) return <div className="text-center text-gray-600 mt-8">Video not found</div>;
 
   return (
     <div>
