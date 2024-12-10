@@ -4,6 +4,18 @@ import User from '../models/User';
 
 const router = express.Router();
 
+// Get all users
+router.get('/', auth, async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('username avatarUrl')
+      .sort({ username: 1 });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching users' });
+  }
+});
+
 // Get user's watch history
 router.get('/history', auth, async (req, res) => {
   try {
